@@ -384,9 +384,24 @@ grid.addEventListener('mouseleave', () => {
 // All widgets in order for hotkey binding
 const allWidgets = [];
 
+// Function to update visual selection of tools
+let currentToolIndex = 0;
+function setToolSelected(index) {
+    if (index === 1) return; // skip info widget
+    currentToolIndex = index;
+    allWidgets.forEach((w, i) => {
+        if (i === index) {
+            w.element.classList.add('selected');
+        } else if (i !== 1) {
+            w.element.classList.remove('selected');
+        }
+    });
+}
+
 // add cursor to ui
 const cursorWidget = document.getElementById('cursorWidget');
 cursorWidget.addEventListener('click', () => {
+    setToolSelected(0);
     if (ghostImg) {
         ghostImg.style.display = 'none';
         ghostImg.src = '';
@@ -437,6 +452,9 @@ BLOCK_BASES.forEach((block, key) => {
     widget.appendChild(label);
 
     widget.addEventListener('click', () => {
+        const myIndex = allWidgets.findIndex(w => w.element === widget);
+        if (myIndex !== -1) setToolSelected(myIndex);
+        
         selectedBlock = key;
 
         if (!ghostImg) {
@@ -456,6 +474,9 @@ BLOCK_BASES.forEach((block, key) => {
     blockSidebar.appendChild(widget);
     allWidgets.push({ element: widget, blockKey: key, blockBase: block });
 });
+
+// Initialize cursor as selected
+setToolSelected(0);
 
 // Add hotkey badges to all widgets following 2-column grid layout
 // Left column (even indices) = N, Right column (odd indices) = ⇧N
@@ -794,6 +815,35 @@ document.addEventListener('keydown', e => {
         }
     }
 });
+
+// Mouse wheel to cycle selected tool
+let lastWheelTime = 0;
+document.addEventListener('wheel', e => {
+    // let sidebar or info modal scroll naturally
+    if (e.target.closest('.sidebar') || e.target.closest('.info-modal-overlay')) return;
+    
+    e.preventDefault();
+    
+    const now = Date.now();
+    if (now - lastWheelTime < 150) return; // Throttle to prevent hyper-fast cycling
+    lastWheelTime = now;
+    
+    let nextIndex = currentToolIndex;
+    
+    if (e.deltaY > 0) {
+        nextIndex++;
+        if (nextIndex === 1) nextIndex = 2; // skip info modal
+        if (nextIndex >= allWidgets.length) nextIndex = 0;
+    } else if (e.deltaY < 0) {
+        nextIndex--;
+        if (nextIndex === 1) nextIndex = 0; // skip info modal
+        if (nextIndex < 0) nextIndex = allWidgets.length - 1;
+    }
+    
+    if (nextIndex !== currentToolIndex) {
+        allWidgets[nextIndex].element.click();
+    }
+}, { passive: false });
 
 
 class Thing {
