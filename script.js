@@ -370,15 +370,30 @@ function rotateRightDirection(direction) {
 
 let selectedBlock = null;
 let ghostImg = null;
+let hoveredCell = null; // tracks the cell currently under the mouse
+
+// Track hovered cell globally
+grid.addEventListener('mouseover', e => {
+    const cell = e.target.closest('.cell');
+    if (cell) hoveredCell = cell;
+});
+grid.addEventListener('mouseleave', () => {
+    hoveredCell = null;
+});
+
+// All widgets in order for hotkey binding
+const allWidgets = [];
 
 // add cursor to ui
-document.getElementById('cursorWidget').addEventListener('click', () => {
+const cursorWidget = document.getElementById('cursorWidget');
+cursorWidget.addEventListener('click', () => {
     if (ghostImg) {
         ghostImg.style.display = 'none';
         ghostImg.src = '';
     }
     selectedBlock = null;
 });
+allWidgets.push({ element: cursorWidget, blockKey: null, blockBase: null });
 
 // add blocks to ui
 BLOCK_BASES.forEach((block, key) => {
@@ -413,6 +428,21 @@ BLOCK_BASES.forEach((block, key) => {
     });
 
     blockSidebar.appendChild(widget);
+    allWidgets.push({ element: widget, blockKey: key, blockBase: block });
+});
+
+// Add hotkey badges to all widgets
+// Cursor = index 0, blocks = 1..17 => total 18
+// 1-9 for first 9 (indices 0-8), Shift+1-9 for next 9 (indices 9-17)
+allWidgets.forEach((w, i) => {
+    const badge = document.createElement('span');
+    badge.classList.add('hotkey-badge');
+    if (i < 9) {
+        badge.textContent = String(i + 1);
+    } else if (i < 18) {
+        badge.textContent = '⇧' + String(i - 8);
+    }
+    w.element.appendChild(badge);
 });
 
 
@@ -520,6 +550,7 @@ function createDirectionalContextList(excluded) {
         contextMenuEl.style.display = 'block';
     }
 
+    // Shift + Right Click => open context menu
     grid.addEventListener('contextmenu', e => {
         e.preventDefault();
 
@@ -530,12 +561,108 @@ function createDirectionalContextList(excluded) {
         const y = parseInt(cell.dataset.y);
         const block = getBlock(x, y);
 
-        const menu = block.getContextMenu();
-        if (menu && menu.contextListMap.size > 0) {
-            showContextMenu(block, e.pageX, e.pageY);
+        if (e.shiftKey) {
+            // Shift + Right Click: open context menu
+            const menu = block.getContextMenu();
+            if (menu && menu.contextListMap.size > 0) {
+                showContextMenu(block, e.pageX, e.pageY);
+            }
+        } else {
+            // Plain Right Click: interact with the block
+            interactWithBlock(block);
         }
     });
 }
+
+// Right-click interaction: toggles levers, advances noteblock, increments repeater delay, toggles comparator mode
+function interactWithBlock(block) {
+    if (block instanceof Lever) {
+        block.on = !block.on;
+        block.setBlockType(BLOCK_TYPES.get('LEVER_' + (block.on ? 'ON' : 'OFF')));
+        block.updateSelf();
+    } else if (block instanceof NoteBlock) {
+        const currentIndex = NOTE_NAMES.indexOf(block.note_name);
+        const nextIndex = (currentIndex + 1) % NOTE_NAMES.length;
+        const nextNote = NOTE_NAMES[nextIndex];
+        block.setBlockType(BLOCK_TYPES.get('NOTE_BLOCK_' + nextNote));
+        block.note_name = nextNote;
+    } else if (block instanceof Repeater) {
+        block.lastSignalChangeTick = -10;
+        removeFromTickQueue(block.queuedId);
+        block.queuedId = -1;
+        block.delay = (block.delay % 4) + 1;
+        block.updateSelf();
+        const behindLoc = locationInDirection(block.x, block.y, getOppositeDirection(block.facing));
+        if (!outOfBounds(behindLoc.x, behindLoc.y)) update(behindLoc.x, behindLoc.y);
+        const frontLoc = locationInDirection(block.x, block.y, block.facing);
+        if (!outOfBounds(frontLoc.x, frontLoc.y)) update(frontLoc.x, frontLoc.y);
+    } else if (block instanceof Comparator) {
+        block.lastSignalChangeTick = -10;
+        removeFromTickQueue(block.queuedId);
+        block.queuedId = -1;
+        block.mode = (block.mode === 'COMPARE') ? 'SUBTRACT' : 'COMPARE';
+        block.setBlockType(BLOCK_TYPES.get(`COMPARATOR_${block.mode}_${block.signal > 0 ? 'ON' : 'OFF'}`));
+        block.updateSelf();
+    }
+}
+
+// R key => rotate the block under the mouse (cycles direction for directional blocks)
+function rotateBlockUnderMouse() {
+    if (!hoveredCell) return;
+    const x = parseInt(hoveredCell.dataset.x);
+    const y = parseInt(hoveredCell.dataset.y);
+    if (outOfBounds(x, y)) return;
+
+    const block = getBlock(x, y);
+    const DIRECTION_ORDER = [DIRECTIONS.UP, DIRECTIONS.RIGHT, DIRECTIONS.DOWN, DIRECTIONS.LEFT];
+
+    function nextDirection(current) {
+        const idx = DIRECTION_ORDER.indexOf(current);
+        return DIRECTION_ORDER[(idx + 1) % 4];
+    }
+
+    if (block instanceof Repeater) {
+        block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    } else if (block instanceof Comparator) {
+        block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    } else if (block instanceof Piston && !block.extended) {
+        block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    } else if (block instanceof StickyPiston && !block.extended) {
+        block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    } else if (block instanceof Observer) {
+        block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    }
+}
+
+function directionToName(dir) {
+    switch (dir) {
+        case DIRECTIONS.UP: return 'Up';
+        case DIRECTIONS.DOWN: return 'Down';
+        case DIRECTIONS.LEFT: return 'Left';
+        case DIRECTIONS.RIGHT: return 'Right';
+    }
+}
+
+// Keyboard hotkeys
+document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    // R key => rotate block under mouse
+    if (e.key === 'r' || e.key === 'R') {
+        rotateBlockUnderMouse();
+        return;
+    }
+
+    // Number keys 1-9 for tool selection (use e.code for shift-independent detection)
+    const digitMatch = e.code && e.code.match(/^Digit([1-9])$/);
+    if (digitMatch) {
+        const num = parseInt(digitMatch[1]);
+        const index = e.shiftKey ? (num + 8) : (num - 1); // shift: indices 9-17, no shift: 0-8
+        if (index < allWidgets.length) {
+            allWidgets[index].element.click();
+        }
+    }
+});
 
 
 class Thing {
