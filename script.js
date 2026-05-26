@@ -395,8 +395,34 @@ cursorWidget.addEventListener('click', () => {
 });
 allWidgets.push({ element: cursorWidget, blockKey: null, blockBase: null });
 
-// add blocks to ui
+// add "?" info widget (replaces Erase)
+const infoWidget = document.createElement('div');
+infoWidget.classList.add('widget');
+{
+    const infoIcon = document.createElement('span');
+    infoIcon.textContent = '?';
+    infoIcon.style.fontSize = '32px';
+    infoIcon.style.fontWeight = 'bold';
+    infoIcon.style.color = '#555';
+    infoIcon.style.lineHeight = '48px';
+    infoIcon.style.display = 'block';
+    infoIcon.style.textAlign = 'center';
+    infoWidget.appendChild(infoIcon);
+
+    const infoLabel = document.createElement('span');
+    infoLabel.textContent = 'Help';
+    infoWidget.appendChild(infoLabel);
+}
+infoWidget.addEventListener('click', () => {
+    showInfoModal();
+});
+blockSidebar.appendChild(infoWidget);
+allWidgets.push({ element: infoWidget, blockKey: null, blockBase: null });
+
+// add blocks to ui (skip BLANK — breaking is done with left click)
 BLOCK_BASES.forEach((block, key) => {
+    if (key === 'BLANK') return; // erase is now left-click
+
     const widget = document.createElement('div');
     widget.classList.add('widget');
     widget.dataset.block_base = key;
@@ -431,19 +457,56 @@ BLOCK_BASES.forEach((block, key) => {
     allWidgets.push({ element: widget, blockKey: key, blockBase: block });
 });
 
-// Add hotkey badges to all widgets
-// Cursor = index 0, blocks = 1..17 => total 18
-// 1-9 for first 9 (indices 0-8), Shift+1-9 for next 9 (indices 9-17)
+// Add hotkey badges to all widgets following 2-column grid layout
+// Left column (even indices) = N, Right column (odd indices) = ⇧N
 allWidgets.forEach((w, i) => {
     const badge = document.createElement('span');
     badge.classList.add('hotkey-badge');
-    if (i < 9) {
-        badge.textContent = String(i + 1);
-    } else if (i < 18) {
-        badge.textContent = '⇧' + String(i - 8);
+    const row = Math.floor(i / 2) + 1; // 1-based row number
+    if (i % 2 === 0) {
+        badge.textContent = String(row); // left column: 1, 2, 3...
+    } else {
+        badge.textContent = '⇧' + String(row); // right column: ⇧1, ⇧2, ⇧3...
     }
     w.element.appendChild(badge);
 });
+
+// Info modal
+function showInfoModal() {
+    let modal = document.getElementById('info-modal');
+    if (modal) { modal.style.display = 'flex'; return; }
+
+    modal = document.createElement('div');
+    modal.id = 'info-modal';
+    modal.classList.add('info-modal-overlay');
+    modal.innerHTML = `
+        <div class="info-modal-content">
+            <h2>⌨️ Controls</h2>
+            <table>
+                <tr><td><kbd>Left Click</kbd></td><td>Break block</td></tr>
+                <tr><td><kbd>Right Click</kbd></td><td>Place block / Interact</td></tr>
+                <tr><td><kbd>Shift</kbd> + <kbd>Right Click</kbd></td><td>Context menu</td></tr>
+                <tr><td><kbd>R</kbd></td><td>Rotate block under cursor</td></tr>
+                <tr><td><kbd>1</kbd> – <kbd>9</kbd></td><td>Select tool (left column)</td></tr>
+                <tr><td><kbd>⇧1</kbd> – <kbd>⇧9</kbd></td><td>Select tool (right column)</td></tr>
+            </table>
+            <h3>🖱️ Right Click interactions</h3>
+            <table>
+                <tr><td><b>Lever</b></td><td>Toggle on/off</td></tr>
+                <tr><td><b>Note Block</b></td><td>Advance note</td></tr>
+                <tr><td><b>Repeater</b></td><td>Cycle delay (1-4)</td></tr>
+                <tr><td><b>Comparator</b></td><td>Toggle mode</td></tr>
+            </table>
+            <button id="info-modal-close">Close</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal || e.target.id === 'info-modal-close') {
+            modal.style.display = 'none';
+        }
+    });
+}
 
 
 document.addEventListener('mousemove', e => {
@@ -453,39 +516,92 @@ document.addEventListener('mousemove', e => {
     }
 });
 
+// --- Minecraft-style controls ---
+// Left click = break, Right click = place/interact, Shift+Right = context menu
+
+let isBreaking = false;
+let lastBrokenKey = null;
 let isPlacing = false;
 let lastPlacedKey = null;
 
+function breakFromEvent(e) {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    const x = parseInt(cell.dataset.x, 10);
+    const y = parseInt(cell.dataset.y, 10);
+    const key = `${x},${y}`;
+    if (key === lastBrokenKey) return;
+    lastBrokenKey = key;
+    const block = getBlock(x, y);
+    if (!(block instanceof Blank)) {
+        setBlockUI('BLANK', x, y);
+    }
+}
+
 function placeFromEvent(e) {
-  const cell = e.target.closest('.cell');
-  if (!cell || !selectedBlock) return;
-
-  const x = parseInt(cell.dataset.x, 10);
-  const y = parseInt(cell.dataset.y, 10);
-
-  // avoid re-setting the same cell repeatedly
-  const key = `${x},${y}`;
-  if (key === lastPlacedKey) return;
-  lastPlacedKey = key;
-
-  setBlockUI(selectedBlock, x, y);
+    const cell = e.target.closest('.cell');
+    if (!cell || !selectedBlock) return;
+    const x = parseInt(cell.dataset.x, 10);
+    const y = parseInt(cell.dataset.y, 10);
+    const key = `${x},${y}`;
+    if (key === lastPlacedKey) return;
+    lastPlacedKey = key;
+    const block = getBlock(x, y);
+    if (block instanceof Blank) {
+        setBlockUI(selectedBlock, x, y);
+    }
 }
 
 grid.addEventListener('dragstart', e => e.preventDefault());
+
 grid.addEventListener('pointerdown', e => {
-  if (e.button !== 0) return;
-  if (!selectedBlock) return;
-  isPlacing = true;
-  placeFromEvent(e);
+    if (e.button === 0) {
+        // Left click = break
+        isBreaking = true;
+        breakFromEvent(e);
+    } else if (e.button === 2 && !e.shiftKey) {
+        // Right click = place or interact
+        const cell = e.target.closest('.cell');
+        if (!cell) return;
+        const x = parseInt(cell.dataset.x, 10);
+        const y = parseInt(cell.dataset.y, 10);
+        const block = getBlock(x, y);
+
+        // Interactive blocks take priority
+        if (block instanceof Lever || block instanceof NoteBlock ||
+            block instanceof Repeater || block instanceof Comparator) {
+            interactWithBlock(block);
+        } else if (block instanceof Blank && selectedBlock) {
+            // Place on empty tile
+            isPlacing = true;
+            lastPlacedKey = `${x},${y}`;
+            setBlockUI(selectedBlock, x, y);
+        }
+    }
 });
+
 grid.addEventListener('pointermove', e => {
-  if (!isPlacing) return;
-  if ((e.buttons & 1) === 0) { isPlacing = false; return; }
-  placeFromEvent(e);
+    // Left drag = break
+    if (isBreaking) {
+        if ((e.buttons & 1) === 0) { isBreaking = false; lastBrokenKey = null; return; }
+        breakFromEvent(e);
+    }
+    // Right drag = place
+    if (isPlacing) {
+        if ((e.buttons & 2) === 0) { isPlacing = false; lastPlacedKey = null; return; }
+        placeFromEvent(e);
+    }
 });
-window.addEventListener('pointerup', () => {
-  isPlacing = false;
-  lastPlacedKey = null;
+
+window.addEventListener('pointerup', (e) => {
+    if (e.button === 0) {
+        isBreaking = false;
+        lastBrokenKey = null;
+    }
+    if (e.button === 2) {
+        isPlacing = false;
+        lastPlacedKey = null;
+    }
 });
 
 
@@ -550,9 +666,10 @@ function createDirectionalContextList(excluded) {
         contextMenuEl.style.display = 'block';
     }
 
-    // Shift + Right Click => open context menu
+    // Context menu: Shift + Right Click only
     grid.addEventListener('contextmenu', e => {
         e.preventDefault();
+        if (!e.shiftKey) return; // plain right-click is handled by pointerdown
 
         const cell = e.target.closest('.cell');
         if (!cell) return;
@@ -561,15 +678,9 @@ function createDirectionalContextList(excluded) {
         const y = parseInt(cell.dataset.y);
         const block = getBlock(x, y);
 
-        if (e.shiftKey) {
-            // Shift + Right Click: open context menu
-            const menu = block.getContextMenu();
-            if (menu && menu.contextListMap.size > 0) {
-                showContextMenu(block, e.pageX, e.pageY);
-            }
-        } else {
-            // Plain Right Click: interact with the block
-            interactWithBlock(block);
+        const menu = block.getContextMenu();
+        if (menu && menu.contextListMap.size > 0) {
+            showContextMenu(block, e.pageX, e.pageY);
         }
     });
 }
@@ -586,6 +697,7 @@ function interactWithBlock(block) {
         const nextNote = NOTE_NAMES[nextIndex];
         block.setBlockType(BLOCK_TYPES.get('NOTE_BLOCK_' + nextNote));
         block.note_name = nextNote;
+        playNote(nextNote); // play the new note so the user hears it
     } else if (block instanceof Repeater) {
         block.lastSignalChangeTick = -10;
         removeFromTickQueue(block.queuedId);
@@ -631,6 +743,24 @@ function rotateBlockUnderMouse() {
         block.applyContext('Direction', directionToName(nextDirection(block.facing)));
     } else if (block instanceof Observer) {
         block.applyContext('Direction', directionToName(nextDirection(block.facing)));
+    } else if (block instanceof RedstoneTorch) {
+        // Cycle through valid torch positions: Ground + adjacent solid walls
+        const validPositions = ['Ground'];
+        const posMap = [
+            { dir: DIRECTIONS.DOWN, pos: 'Down' },
+            { dir: DIRECTIONS.LEFT, pos: 'Left' },
+            { dir: DIRECTIONS.UP, pos: 'Up' },
+            { dir: DIRECTIONS.RIGHT, pos: 'Right' }
+        ];
+        for (const { dir, pos } of posMap) {
+            const loc = locationInDirection(block.x, block.y, dir);
+            if (!outOfBounds(loc.x, loc.y) && getBlock(loc.x, loc.y).isSolid()) {
+                validPositions.push(pos);
+            }
+        }
+        const curIdx = validPositions.indexOf(block.torchPosition);
+        const nextIdx = (curIdx + 1) % validPositions.length;
+        block.applyContext('Position', validPositions[nextIdx]);
     }
 }
 
@@ -653,11 +783,12 @@ document.addEventListener('keydown', e => {
         return;
     }
 
-    // Number keys 1-9 for tool selection (use e.code for shift-independent detection)
+    // Number keys 1-9 for tool selection (2-column grid: N=left, ⇧N=right)
     const digitMatch = e.code && e.code.match(/^Digit([1-9])$/);
     if (digitMatch) {
         const num = parseInt(digitMatch[1]);
-        const index = e.shiftKey ? (num + 8) : (num - 1); // shift: indices 9-17, no shift: 0-8
+        // row = num, left col = (num-1)*2, right col = (num-1)*2+1
+        const index = e.shiftKey ? ((num - 1) * 2 + 1) : ((num - 1) * 2);
         if (index < allWidgets.length) {
             allWidgets[index].element.click();
         }
