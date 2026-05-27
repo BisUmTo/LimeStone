@@ -487,7 +487,7 @@ BLOCK_BASES.forEach((block, key) => {
     widget.addEventListener('click', () => {
         const myIndex = allWidgets.findIndex(w => w.element === widget);
         if (myIndex !== -1) setToolSelected(myIndex);
-        
+
         selectedBlock = key;
 
         if (!ghostImg) {
@@ -1683,6 +1683,21 @@ class RedstoneTorch extends Thing {
     }
 
     applyContext(title, selected) {
+        if (title === 'Position' && selected !== 'Ground') {
+            let dir;
+            switch (selected) {
+                case 'Down': dir = DIRECTIONS.DOWN; break;
+                case 'Left': dir = DIRECTIONS.LEFT; break;
+                case 'Up': dir = DIRECTIONS.UP; break;
+                case 'Right': dir = DIRECTIONS.RIGHT; break;
+            }
+            const holderLoc = locationInDirection(this.x, this.y, dir);
+            
+            if (outOfBounds(holderLoc.x, holderLoc.y) || !getBlock(holderLoc.x, holderLoc.y).isSolid()) {
+                selected = 'Ground';
+            }
+        }
+
         this.torchPosition = selected;
 
         const wallStatus = (this.torchPosition === 'Ground') ? 'GROUND' : 'WALL';
