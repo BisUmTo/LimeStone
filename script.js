@@ -370,6 +370,39 @@ function rotateRightDirection(direction) {
 
 let selectedBlock = null;
 let ghostImg = null;
+
+let toolRotations = {
+    'REPEATER': 'Up',
+    'COMPARATOR': 'Up',
+    'PISTON': 'Right',
+    'STICKY_PISTON': 'Right',
+    'OBSERVER': 'Right',
+    'REDSTONE_TORCH': 'Ground'
+};
+
+function updateGhostRotation() {
+    if (!ghostImg || !selectedBlock) return;
+    
+    let rot = 0;
+    if (['REPEATER', 'COMPARATOR'].includes(selectedBlock)) {
+        const dir = toolRotations[selectedBlock];
+        if (dir === 'Right') rot = 90;
+        else if (dir === 'Down') rot = 180;
+        else if (dir === 'Left') rot = 270;
+    } else if (['PISTON', 'STICKY_PISTON', 'OBSERVER'].includes(selectedBlock)) {
+        const dir = toolRotations[selectedBlock];
+        if (dir === 'Down') rot = 90;
+        else if (dir === 'Left') rot = 180;
+        else if (dir === 'Up') rot = 270;
+    } else if (selectedBlock === 'REDSTONE_TORCH') {
+        const pos = toolRotations.REDSTONE_TORCH;
+        if (pos === 'Down') rot = 180;
+        else if (pos === 'Left') rot = 270;
+        else if (pos === 'Right') rot = 90;
+    }
+    
+    ghostImg.style.transform = `rotate(${rot}deg)`;
+}
 let hoveredCell = null; // tracks the cell currently under the mouse
 
 // Track hovered cell globally
@@ -464,11 +497,13 @@ BLOCK_BASES.forEach((block, key) => {
             ghostImg.style.width = '64px';
             ghostImg.style.height = '64px';
             ghostImg.style.zIndex = '1000';
+            ghostImg.style.transition = 'transform 0.1s ease';
             document.body.appendChild(ghostImg);
         }
 
         ghostImg.src = block.src;
         ghostImg.style.display = 'block';
+        updateGhostRotation();
     });
 
     blockSidebar.appendChild(widget);
@@ -559,6 +594,17 @@ function breakFromEvent(e) {
     }
 }
 
+function applyToolRotation(x, y) {
+    const newBlock = getBlock(x, y);
+    if (toolRotations[selectedBlock]) {
+        if (selectedBlock === 'REDSTONE_TORCH') {
+            newBlock.applyContext('Position', toolRotations.REDSTONE_TORCH);
+        } else {
+            newBlock.applyContext('Direction', toolRotations[selectedBlock]);
+        }
+    }
+}
+
 function placeFromEvent(e) {
     const cell = e.target.closest('.cell');
     if (!cell || !selectedBlock) return;
@@ -570,6 +616,7 @@ function placeFromEvent(e) {
     const block = getBlock(x, y);
     if (block instanceof Blank) {
         setBlockUI(selectedBlock, x, y);
+        applyToolRotation(x, y);
     }
 }
 
@@ -597,6 +644,7 @@ grid.addEventListener('pointerdown', e => {
             isPlacing = true;
             lastPlacedKey = `${x},${y}`;
             setBlockUI(selectedBlock, x, y);
+            applyToolRotation(x, y);
         }
     }
 });
@@ -747,6 +795,24 @@ function rotateBlockUnderMouse() {
     if (outOfBounds(x, y)) return;
 
     const block = getBlock(x, y);
+
+    if (block instanceof Blank && selectedBlock) {
+        // Rotate the tool in hand
+        const DIRECTION_ORDER = ['Up', 'Right', 'Down', 'Left'];
+        if (['REPEATER', 'COMPARATOR', 'PISTON', 'STICKY_PISTON', 'OBSERVER'].includes(selectedBlock)) {
+            const current = toolRotations[selectedBlock];
+            const nextIdx = (DIRECTION_ORDER.indexOf(current) + 1) % 4;
+            toolRotations[selectedBlock] = DIRECTION_ORDER[nextIdx];
+            updateGhostRotation();
+        } else if (selectedBlock === 'REDSTONE_TORCH') {
+            const torchPositions = ['Ground', 'Down', 'Left', 'Up', 'Right'];
+            const curIdx = torchPositions.indexOf(toolRotations.REDSTONE_TORCH);
+            toolRotations.REDSTONE_TORCH = torchPositions[(curIdx + 1) % 5];
+            updateGhostRotation();
+        }
+        return;
+    }
+
     const DIRECTION_ORDER = [DIRECTIONS.UP, DIRECTIONS.RIGHT, DIRECTIONS.DOWN, DIRECTIONS.LEFT];
 
     function nextDirection(current) {
