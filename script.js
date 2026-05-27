@@ -863,6 +863,27 @@ function directionToName(dir) {
 // Keyboard hotkeys
 document.addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Chiudi Help Menu con ESC
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('info-modal');
+        if (modal && modal.style.display !== 'none') {
+            modal.style.display = 'none';
+        }
+        return;
+    }
+
+    // Salva (CTRL+S) e Apri (CTRL+O) 
+    if (e.ctrlKey && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault(); // Previene il salvataggio della pagina web del browser
+        saveState();
+        return;
+    }
+
+    if (e.ctrlKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault(); // Previene l'apertura file nativa del browser
+        document.getElementById('file-input').click();
+        return;
+    }
 
     // R key => rotate block under mouse
     if (e.key === 'r' || e.key === 'R') {
@@ -2551,5 +2572,104 @@ function arraysEqualContents(A, B) {
     return AsubB && sameLength;
 }
 
+// Esporta la griglia in un file JSON
+function saveState() {
+    const state = {
+        width: width,
+        height: height,
+        blocks: []
+    };
+
+    for (let x = 0; x < width; x++) {
+        for (let y = 0; y < height; y++) {
+            const block = getBlock(x, y);
+            
+            // Ignoriamo i blocchi vuoti e le braccia dei pistoni (verranno ricreate automaticamente)
+            if (!(block instanceof Blank) && block.getBlockBase() !== 'PISTON_ARM' && block.getBlockBase() !== 'STICKY_PISTON_ARM') {
+                const blockData = {
+                    x: x,
+                    y: y,
+                    base: block.getBlockBase()
+                };
+                
+                // Salviamo le configurazioni specifiche del blocco se presenti
+                if (block.facing) blockData.facing = directionToName(block.facing);
+                if (block.delay) blockData.delay = block.delay;
+                if (block.mode) blockData.mode = block.mode;
+                if (block instanceof Lever) blockData.on = block.on;
+                if (block.note_name) blockData.note_name = block.note_name;
+                if (block.torchPosition) blockData.torchPosition = block.torchPosition;
+                
+                state.blocks.push(blockData);
+            }
+        }
+    }
+
+    // Creazione e download del file JSON
+    const json = JSON.stringify(state, null, 2);
+    const blob = new Blob([json], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'limestone_save.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// Carica la griglia da un file JSON
+function loadState(jsonString) {
+    try {
+        const state = JSON.parse(jsonString);
+        if (state.width && state.height) {
+            width = state.width;
+            height = state.height;
+        }
+        
+        // Ricostruiamo la griglia pulita
+        createGrid(width, height);
+        
+        // Inseriamo i blocchi
+        state.blocks.forEach(b => {
+            setBlockUI(b.base, b.x, b.y);
+            const block = getBlock(b.x, b.y);
+            
+            // Ripristiniamo le configurazioni specifiche simulando le azioni del context menu
+            if (b.facing) block.applyContext('Direction', b.facing);
+            if (b.delay) block.applyContext('Delay', b.delay.toString());
+            if (b.mode) {
+                const modeStr = b.mode === 'COMPARE' ? 'Compare' : 'Subtract';
+                block.applyContext('Mode', modeStr);
+            }
+            if (b.base === 'LEVER' && b.on !== undefined) {
+                block.applyContext('Power', b.on ? 'Toggle (on)' : 'Toggle (off)');
+            }
+            if (b.note_name) block.applyContext('Note Name', b.note_name);
+            if (b.torchPosition) block.applyContext('Position', b.torchPosition);
+        });
+    } catch (e) {
+        console.error("Errore nel caricamento del salvataggio:", e);
+        alert("Impossibile caricare il file JSON. Il formato potrebbe essere non valido.");
+    }
+}
+
+// Colleghiamo i pulsanti della UI
+document.getElementById('saveWidget').addEventListener('click', saveState);
+
+document.getElementById('openWidget').addEventListener('click', () => {
+    document.getElementById('file-input').click();
+});
+
+document.getElementById('file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+        loadState(event.target.result);
+    };
+    reader.readAsText(file);
+    e.target.value = ''; // Resetta l'input per permettere di ricaricare lo stesso file in futuro
+});
 
 createGrid(width, height);
